@@ -7,28 +7,175 @@
   <!-- Auto-refresh every 5 minutes -->
   <meta http-equiv="refresh" content="300" />
 
-  <title>Calendar Display</title>
+  <title>Calendar (ICS)</title>
 
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      background: #ffffff;
-      overflow: hidden;
-    }
-    iframe {
-      border: 0;
-      width: 100vw;
-      height: 100vh;
-    }
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #fff; }
+    .wrap { padding: 18px 22px; }
+    .header { display:flex; align-items:baseline; justify-content:space-between; gap:16px; }
+    .title { font-size: 28px; font-weight: bold; }
+    .date  { font-size: 18px; opacity: 0.75; }
+    .status { margin-top: 8px; font-size: 14px; opacity: 0.7; }
+    .list { margin-top: 14px; display:flex; flex-direction:column; gap: 12px; }
+    .event { border: 1px solid rgba(0,0,0,0.10); border-radius: 14px; padding: 12px 14px; }
+    .row1 { display:flex; justify-content:space-between; gap:12px; align-items:baseline; }
+    .when { font-size: 22px; font-weight: 700; white-space:nowrap; }
+    .summary { font-size: 20px; font-weight: 600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .row2 { margin-top: 6px; font-size: 16px; opacity: 0.8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .empty { margin-top: 18px; font-size: 18px; opacity: 0.75; }
   </style>
 </head>
 <body>
-  <iframe
-    src="https://calendar.google.com/calendar/embed?height=480&wkst=1&ctz=America%2FNew_York&showPrint=0&mode=AGENDA&showNav=0&showTabs=0&showCalendars=0&showTz=0&title=Ben's%20Schedule&showDate=0&src=bWFpbC5iZW5yb2dlcnNAZ21haWwuY29t&color=%23039be5"
-    scrolling="no">
-  </iframe>
+  <div class="wrap">
+    <div class="header">
+      <div class="title">Upcoming Events</div>
+      <div class="date" id="today"></div>
+    </div>
+    <div class="status" id="status">Loading…</div>
+    <div class="list" id="list"></div>
+    <div class="empty" id="empty" style="display:none;">No upcoming events.</div>
+  </div>
+
+<script>
+  const ICS_URL = "https://calendar.google.com/calendar/ical/mail.benrogers%40gmail.com/public/basic.ics";
+
+  document.getElementById("today").textContent =
+    new Date().toLocaleDateString(undefined, { weekday:"long", month:"long", day:"numeric" });
+
+  const statusEl = document.getElementById("status");
+  const listEl   = document.getElementById("list");
+  const emptyEl  = document.getElementById("empty");
+
+  function unfoldICSLines(text) {
+    return text.replace(/\r?\n[ \t]/g, "");
+  }
+
+  function parseICSToEvents(icsText) {
+    const text = unfoldICSLines(icsText);
+    const lines = text.split(/\r?\n/);
+
+    const events = [];
+    let inEvent = false;
+    let cur = {};
+
+    function pushIfValid(e) {
+      if (!e || !e.dtstart) return;
+      events.push(e);
+    }
+
+    for (const line of lines) {
+      if (line === "BEGIN:VEVENT") { inEvent = true; cur = {}; continue; }
+      if (line === "END:VEVENT")   { inEvent = false; pushIfValid(cur); cur = {}; continue; }
+      if (!inEvent) continue;
+
+      const idx = line.indexOf(":");
+      if (idx === -1) continue;
+
+      const key = line.slice(0, idx).split(";")[0].toUpperCase();
+      const value = line.slice(idx + 1);
+
+      if (key === "SUMMARY") cur.summary = value;
+      if (key === "LOCATION") cur.location = value;
+      if (key === "DTSTART") cur.dtstartRaw = value;
+      if (key === "DTEND")   cur.dtendRaw = value;
+    }
+
+    for (const e of events) {
+      e.dtstart = parseICSDate(e.dtstartRaw);
+      e.dtend   = e.dtendRaw ? parseICSDate(e.dtendRaw) : null;
+    }
+
+    return events;
+  }
+
+  function parseICSDate(raw) {
+    if (!raw) return null;
+    if (/^\d{8}$/.test(raw)) {
+      const y = +raw.slice(0,4), m = +raw.slice(4,6) - 1, d = +raw.slice(6,8);
+      return new Date(y, m, d);
+    }
+    const isUTC = raw.endsWith("Z");
+    const s = isUTC ? raw.slice(0, -1) : raw;
+    const y = +s.slice(0,4), m = +s.slice(4,6) - 1, d = +s.slice(6,8);
+    const hh = +s.slice(9,11), mm = +s.slice(11,13);
+    if (isUTC) return new Date(Date.UTC(y, m, d, hh, mm));
+    return new Date(y, m, d, hh, mm);
+  }
+
+  function formatWhen(e) {
+    const d = e.dtstart;
+    const isAllDay = /^\d{8}$/.test(e.dtstartRaw);
+    const dayLabel = d.toLocaleDateString(undefined, { month:"numeric", day:"numeric" });
+    if (isAllDay) return `${dayLabel} • All day`;
+    const timeLabel = d.toLocaleTimeString(undefined, { hour:"numeric", minute:"2-digit" });
+    return `${dayLabel} • ${timeLabel}`;
+  }
+
+  function render(events) {
+    listEl.innerHTML = "";
+    emptyEl.style.display = "none";
+    const now = new Date();
+    const upcoming = events
+      .filter(e => e.dtstart && e.dtstart >= now)
+      .sort((a,b) => a.dtstart - b.dtstart)
+      .slice(0, 10);
+
+    if (!upcoming.length) {
+      emptyEl.style.display = "block";
+      return;
+    }
+
+    upcoming.forEach(e => {
+      const card = document.createElement("div");
+      card.className = "event";
+
+      const row1 = document.createElement("div");
+      row1.className = "row1";
+
+      const when = document.createElement("div");
+      when.className = "when";
+      when.textContent = formatWhen(e);
+
+      const summary = document.createElement("div");
+      summary.className = "summary";
+      summary.textContent = e.summary || "(No title)";
+
+      row1.appendChild(when);
+      row1.appendChild(summary);
+
+      const row2 = document.createElement("div");
+      row2.className = "row2";
+      row2.textContent = e.location ? `📍 ${e.location}` : "";
+
+      card.appendChild(row1);
+      if (row2.textContent) card.appendChild(row2);
+
+      listEl.appendChild(card);
+    });
+  }
+
+  async function loadICS() {
+    try {
+      statusEl.textContent = "Loading calendar…";
+      const url = ICS_URL + "?t=" + Date.now();
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const icsText = await res.text();
+      const events = parseICSToEvents(icsText);
+
+      const now = new Date();
+      statusEl.textContent = `Updated: ${now.toLocaleTimeString(undefined, {hour:"numeric", minute:"2-digit"})}`;
+      render(events);
+    } catch (err) {
+      statusEl.textContent = "Could not load calendar";
+      listEl.innerHTML = "";
+      emptyEl.style.display = "block";
+      console.error(err);
+    }
+  }
+
+  loadICS();
+</script>
 </body>
 </html>
