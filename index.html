@@ -38,7 +38,7 @@
   </div>
 
 <script>
-  // Your public iCal feed:
+  // ✅ Correct public iCal feed:
   const ICS_URL = "https://calendar.google.com/calendar/ical/mail.benrogers%40gmail.com/public/basic.ics";
 
   document.getElementById("today").textContent =
@@ -49,15 +49,10 @@
   const emptyEl  = document.getElementById("empty");
 
   function unfoldICSLines(text) {
-    // ICS "folding": lines starting with space/tab continue the previous line
     return text.replace(/\r?\n[ \t]/g, "");
   }
 
   function parseICSDate(raw) {
-    // Supports:
-    // YYYYMMDD (all-day)
-    // YYYYMMDDTHHMMSSZ (UTC)
-    // YYYYMMDDTHHMMSS (local)
     if (!raw) return null;
 
     if (/^\d{8}$/.test(raw)) {
@@ -130,8 +125,6 @@
     emptyEl.style.display = "none";
 
     const now = new Date();
-
-    // Keep current event visible for a bit (4 hours back)
     const cutoff = new Date(now.getTime() - 4 * 60 * 60 * 1000);
 
     const upcoming = events
@@ -177,13 +170,9 @@
   async function loadICS() {
     try {
       statusEl.textContent = "Loading calendar…";
-
-      // Cache buster so embedded browsers don't stick on an old file
       const url = ICS_URL + (ICS_URL.includes("?") ? "&" : "?") + "t=" + Date.now();
-
       const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
       const text = await res.text();
       const events = parseICSToEvents(text);
 
